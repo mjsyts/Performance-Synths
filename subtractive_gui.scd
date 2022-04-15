@@ -974,8 +974,20 @@ filtEnvCurveSlider=Slider(filtEnvGUI, Rect(4, 108, 192, 15))
 
 ~filtEnvKnob = Knob(filtEnvGUI, Rect(200+(220-mulKnobSize/2), 310-mulKnobSize/2, mulKnobSize, mulKnobSize))
 .value_(0.5)
+	.step_(0.01)
+	.shift_scale_(50)
+	.alt_scale_(0.05)
 .action_({
 		filtNode.set(\peak, ~filtCVMap.map(~filtEnvKnob.value));
+		~filtValBox.value_(~filtCVMap.map(~filtEnvKnob.value));
+});
+	
+	~filtValBox = NumberBox(filtEnvGUI, Rect(200+(220-60/2), 240, 60, 20))
+	.value_(0.5)
+	.align_(\center)
+	.decimals_(2)
+.action_({
+		~filtEnvKnob.valueAction_(~filtCVMap.unmap(~filtValBox.value));
 });
 
 filtEnvGUI.decorator_(FlowLayout(Rect(filtEnvGUIx, filtEnvGUIy, 200, 310)));
