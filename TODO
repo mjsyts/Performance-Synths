@@ -1,0 +1,15 @@
+Todo List:
+
+1. Add MIDI controls
+
+2. Change filter envelope behavior related to control knob
+
+3. Add filter control knob label and value number box
+
+4. Add bus scopes
+
+5. Add presets/save settings implementation
+
+6. Add noise widget
+
+7. Upgrade filter GUI with EnvelopeView/control specs
