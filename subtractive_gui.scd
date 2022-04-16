@@ -1,7 +1,7 @@
 (
 var win;
 var mixGUI, mixFlow;
-var winX=180, winY=300, winWidth=1120, winHeight=680;
+var winX=150, winY=300, winWidth=1120, winHeight=680;
 var sliderWidth=20, sliderHeight=140;
 var gateButton;
 var mixGUIx=20, mixGUIy=350, mixGUIwidth=220, mixGUIheight=310;
@@ -45,7 +45,7 @@ var oct1Slider, oct2Slider, oct3Slider, semi1Slider, semi2Slider, semi3Slider, f
 var osc1OctWidget, osc2OctWidget, osc3octWidget;
 var oscSlider1, oscSlider2, oscSlider3;
 var oscOctWidgetX=20, oscOctWidgetY=225, oscOctWidgetW=10, oscOctWidgetH=70;
-var octMap, semiMap, fineMap, octNumMap;
+var octSlideMap, semiMap, fineMap, octNumMap;
 var filtGUI;
 var filtGUIx=460, filtGUIy=350, filtGUIwidth=220, filtGUIheight=310;
 var cutoffKnobY=20, cutoffKnobSize=150;
@@ -78,6 +78,11 @@ var buttonGUI;
 s = Server.local;
 s.newBusAllocators;
 s.freeAll;
+s.freeAllBuffers;
+s.options.numInputBusChannels_(0);
+Window.closeAll;
+MIDIClient.init;
+MIDIIn.connectAll;
 s.waitForBoot({
 	Knob.defaultMode_(\vert);
 
@@ -85,12 +90,12 @@ s.waitForBoot({
 
 	/////////////???/////CONTROL SPEC MAP/////////////////////////
 
-~filterMap = ControlSpec(20,20000,\exp);
-~resMap = ControlSpec(1.0,0.0,\lin,0.01);
-~curveMap = ControlSpec(-4.0,4.0,\lin);
-~envMap = ControlSpec(0.001,10.0,\exp);
-~filtCVMap = ControlSpec(-10.0,10.0,\lin);
-
+	~filterMap = ControlSpec(20,20000,\exp);
+	~resMap = ControlSpec(1.0,0.0,\lin,0.01);
+	~curveMap = ControlSpec(-4.0,4.0,\lin);
+	~envMap = ControlSpec(0.001,10.0,\exp);
+	~filtCVMap = ControlSpec(-10.0,10.0,\lin);
+	~octaveMap = ControlSpec(-4, 4, \lin);
 
 
 
@@ -109,7 +114,8 @@ s.waitForBoot({
 	~mixBus = Bus.audio(s, 1);
 	~ampEnvBus = Bus.audio(s, 1);
 	~filtBus = Bus.audio(s,1);
-	~sigGrp = Group.new;
+	~sigGrp = Group(s);
+	~oscGrp = Group(~sigGrp);
 	s.sync;
 
 
@@ -124,13 +130,15 @@ s.waitForBoot({
 
 
 	SynthDef(\osc, {
-		arg shape=0, amp=1, out, freq=261.63, width=0.5;
-		var wave, sig;
+		arg shape=0, freq=60.midicps, amp=1, out, oct=0, semi=0, fine=0, width=0.5, lag=0.0;
+		var wave, sig, pitch;
+		pitch = ((12*oct)+semi+fine).midiratio*freq;
+		pitch = Lag.kr(pitch, lag);
 		wave = [
-			SinOsc.ar(freq),
-			VarSaw.ar(freq),
-			Saw.ar(freq),
-			Pulse.ar(freq, width)
+			SinOsc.ar(pitch),
+			VarSaw.ar(pitch),
+			Saw.ar(pitch),
+			Pulse.ar(pitch, width)
 		];
 		sig = SelectX.ar(shape, wave);
 		sig = (sig*amp)/4;
@@ -138,7 +146,7 @@ s.waitForBoot({
 	}).add;
 
 	SynthDef(\noise, {
-		arg noiseSel=0, amp=1, out;
+		arg noiseSel=0, amp=0, out;
 		var noiseArray, sig;
 		noiseArray = [
 			WhiteNoise.ar,
@@ -183,9 +191,9 @@ s.waitForBoot({
 
 	//////////CREATE SYNTHS/////////
 
-	osc1Node = Synth(\osc, [\out, ~osc1Bus], ~sigGrp);
-	osc2Node = Synth(\osc, [\out, ~osc2Bus], ~sigGrp);
-	osc3Node = Synth(\osc, [\out, ~osc3Bus], ~sigGrp);
+	osc1Node = Synth(\osc, [\out, ~osc1Bus], ~oscGrp);
+	osc2Node = Synth(\osc, [\out, ~osc2Bus], ~oscGrp);
+	osc3Node = Synth(\osc, [\out, ~osc3Bus], ~oscGrp);
 	noiseNode = Synth(\noise, [\out, ~noiseBus], ~sigGrp);
 	mixNode = Synth(\envMix, [\out, ~mixBus], ~sigGrp, \addToTail);
 	filtNode = Synth(\filter, [\out, 0, \in, ~mixBus.index], s, \addToTail);
@@ -202,7 +210,9 @@ s.waitForBoot({
 
 	win = Window("Mixer GUI", Rect(winX,winY,winWidth,winHeight)).front
 	.background_(Color.white)
-	.onClose_({s.freeAll});
+	.onClose_({s.freeAll;
+		MIDIdef.freeAll;
+	});
 
 
 
@@ -315,7 +325,7 @@ MUTE", Color.white, Color.green(0.8)]
 	.ctrl_scale_(10);
 
 	mixVal4 = NumberBox(mixGUI, sliderValWidth@sliderValHeight)
-	.value_(1)
+	.value_(0)
 	.align_(\center)
 	.font_(Font(size:10))
 	.action_({
@@ -417,8 +427,8 @@ MUTE", Color.white, Color.green(0.8)]
 	.action_({
 		var val;
 		val = aSlider.value.linexp(0.0,1.0,0.001,10.0);
-	envWidget
-	.setEnv(Env.adsr(~envMap.map(aSlider.value), ~envMap.map(dSlider.value), sSlider.value, ~envMap.map(rSlider.value), curve:~curveMap.map(curveSlider.value)));
+		envWidget
+		.setEnv(Env.adsr(~envMap.map(aSlider.value), ~envMap.map(dSlider.value), sSlider.value, ~envMap.map(rSlider.value), curve:~curveMap.map(curveSlider.value)));
 		aVal.value_(val.round(0.001));
 		mixNode.set(\atk, val);
 	});
@@ -429,7 +439,7 @@ MUTE", Color.white, Color.green(0.8)]
 		var val;
 		val = dSlider.value.linexp(0.0,1.0,0.001,10.0);
 		envWidget
-	.setEnv(Env.adsr(~envMap.map(aSlider.value), ~envMap.map(dSlider.value), sSlider.value, ~envMap.map(rSlider.value), curve:~curveMap.map(curveSlider.value)));
+		.setEnv(Env.adsr(~envMap.map(aSlider.value), ~envMap.map(dSlider.value), sSlider.value, ~envMap.map(rSlider.value), curve:~curveMap.map(curveSlider.value)));
 		dVal.value_(val.round(0.001));
 		mixNode.set(\dec, val);
 	});
@@ -439,8 +449,8 @@ MUTE", Color.white, Color.green(0.8)]
 	.action_({
 		var val;
 		val = sSlider.value;
-	envWidget
-	.setEnv(Env.adsr(~envMap.map(aSlider.value), ~envMap.map(dSlider.value), sSlider.value, ~envMap.map(rSlider.value), curve:~curveMap.map(curveSlider.value)));
+		envWidget
+		.setEnv(Env.adsr(~envMap.map(aSlider.value), ~envMap.map(dSlider.value), sSlider.value, ~envMap.map(rSlider.value), curve:~curveMap.map(curveSlider.value)));
 		sVal.value_(sSlider.value.round(0.01));
 		mixNode.set(\sus, val);
 	});
@@ -450,8 +460,8 @@ MUTE", Color.white, Color.green(0.8)]
 	.action_({
 		var val;
 		val = rSlider.value.linexp(0.0,1.0,0.001,10.0);
-	envWidget
-	.setEnv(Env.adsr(~envMap.map(aSlider.value), ~envMap.map(dSlider.value), sSlider.value, ~envMap.map(rSlider.value), curve:~curveMap.map(curveSlider.value)));
+		envWidget
+		.setEnv(Env.adsr(~envMap.map(aSlider.value), ~envMap.map(dSlider.value), sSlider.value, ~envMap.map(rSlider.value), curve:~curveMap.map(curveSlider.value)));
 		rVal.value_(val.round(0.001));
 		mixNode.set(\rel, val);
 	});
@@ -519,21 +529,21 @@ MUTE", Color.white, Color.green(0.8)]
 	StaticText(envGUI, 21@10).string_("Sus").font_(Font(size:11, bold:true)).align_(\center);
 	StaticText(envGUI, 21@10).string_("Rel").font_(Font(size:11, bold:true)).align_(\center);
 
-	buttonGUI = View(win, Rect(830, 20, 50, 50))
-	.background_(Color.white);
-	gateButton = Button(buttonGUI, Rect(2,2,46,46))
-	.states_([["Gate", Color.black, Color.green], ["Gate", Color.black, Color.red]])
-	.value_(0)
-	.action_({
-		mixNode.set(\gate, gateButton.value);
-		filtNode.set(\gate, gateButton.value)
-	});
+	// buttonGUI = View(win, Rect(830, 20, 50, 50))
+	// .background_(Color.white);
+	// gateButton = Button(buttonGUI, Rect(2,2,46,46))
+	// .states_([["Gate", Color.black, Color.green], ["Gate", Color.black, Color.red]])
+	// .value_(0)
+	// .action_({
+	// 	mixNode.set(\gate, gateButton.value);
+	// 	filtNode.set(\gate, gateButton.value)
+	// });
 
 
 
 
 
-//////////////////////OSCILLATORS////////////////////////////
+	//////////////////////OSCILLATORS////////////////////////////
 
 
 
@@ -553,353 +563,351 @@ MUTE", Color.white, Color.green(0.8)]
 	osc3GUI = View(win, Rect(guiXs.at(2),osc1GUIy,oscGUIwidth,oscGUIheight))
 	.background_(Color.grey(greyness));
 
-//Control Spec Map
+	//Control Spec Map
 
-octMap = ControlSpec(1, 108, \lin, 12);
-octNumMap = ControlSpec(0, 8, \lin, 1);
-semiMap = ControlSpec(-11, 11, \lin);
-fineMap = ControlSpec(-0.99, 0.99, \lin, 0.01);
+	octSlideMap = ControlSpec(1, 108, \lin, 12);
+	octNumMap = ControlSpec(0, 8, \lin, 1);
+	semiMap = ControlSpec(-11, 11, \lin);
+	fineMap = ControlSpec(-0.99, 0.99, \lin, 0.01);
 
-//Freq Display
+	//Freq Display
 
-osc1freqDisp = StaticText(osc1GUI, Rect(freqDispX, freqDispY, oscGUIwidth-(freqDispX*2), freqDispSize))
-.string_(60.midicps.round(0.01))
-.background_(Color.grey(0.9))
-.align_(\center)
-.font_(Font(size:48));
+	osc1freqDisp = StaticText(osc1GUI, Rect(freqDispX, freqDispY, oscGUIwidth-(freqDispX*2), freqDispSize))
+	.string_(60.midicps.round(0.01))
+	.background_(Color.grey(0.9))
+	.align_(\center)
+	.font_(Font(size:48));
 
-osc2freqDisp = StaticText(osc2GUI, Rect(freqDispX, freqDispY, oscGUIwidth-(freqDispX*2), freqDispSize))
-.string_(60.midicps.round(0.01))
-.background_(Color.grey(0.9))
-.align_(\center)
-.font_(Font(size:48));
+	osc2freqDisp = StaticText(osc2GUI, Rect(freqDispX, freqDispY, oscGUIwidth-(freqDispX*2), freqDispSize))
+	.string_(60.midicps.round(0.01))
+	.background_(Color.grey(0.9))
+	.align_(\center)
+	.font_(Font(size:48));
 
-osc3freqDisp = StaticText(osc3GUI, Rect(freqDispX, freqDispY, oscGUIwidth-(freqDispX*2), freqDispSize))
-.string_(60.midicps.round(0.01))
-.background_(Color.grey(0.9))
-.align_(\center)
-.font_(Font(size:48));
+	osc3freqDisp = StaticText(osc3GUI, Rect(freqDispX, freqDispY, oscGUIwidth-(freqDispX*2), freqDispSize))
+	.string_(60.midicps.round(0.01))
+	.background_(Color.grey(0.9))
+	.align_(\center)
+	.font_(Font(size:48));
 
-//Pitch Sliders
+	//Pitch Sliders
 
-View(osc1GUI, Rect(48, 155, 120, 1))
-.background_(Color.black);
-View(osc2GUI, Rect(48, 155, 120, 1))
-.background_(Color.black);
-View(osc3GUI, Rect(48, 155, 120, 1))
-.background_(Color.black);
+	View(osc1GUI, Rect(48, 155, 120, 1))
+	.background_(Color.black);
+	View(osc2GUI, Rect(48, 155, 120, 1))
+	.background_(Color.black);
+	View(osc3GUI, Rect(48, 155, 120, 1))
+	.background_(Color.black);
 
-///OSC1
+	///OSC1
 
-osc1SliderFlow = FlowView(osc1GUI, Rect(0, oscSliderFlowY, oscGUIwidth, oscSliderFlowHeight+10), oscSliderMargin@0, oscSliderGap@0);
+	osc1SliderFlow = FlowView(osc1GUI, Rect(0, oscSliderFlowY, oscGUIwidth, oscSliderFlowHeight+10), oscSliderMargin@0, oscSliderGap@0);
 
-oct1Slider=Slider(osc1SliderFlow, oscPitchSliderSize)
-.value_(0.5)
-.step_(1/8)
-.action_({
-	osc1freqDisp.string = ((octNumMap.map(oct1Slider.value).octcps) * (semiMap.map(semi1Slider.value).midiratio) * (fineMap.map(fine1Slider.value).midiratio)).round(0.01);
-	osc1OctVal.value = octNumMap.map(oct1Slider.value);
-		osc1Node.set(\freq, ((octNumMap.map(oct1Slider.value).octcps) * (semiMap.map(semi1Slider.value).midiratio) * (fineMap.map(fine1Slider.value).midiratio)));
-});
+	oct1Slider=Slider(osc1SliderFlow, oscPitchSliderSize)
+	.value_(0.5)
+	.step_(1/8)
+	.action_({
+		osc1freqDisp.string = ((octNumMap.map(oct1Slider.value).octcps) * (semiMap.map(semi1Slider.value).midiratio) * (fineMap.map(fine1Slider.value).midiratio)).round(0.01);
+		osc1OctVal.value = octNumMap.map(oct1Slider.value).round(0.01);
+		osc1Node.set(\oct, ~octaveMap.map(oct1Slider.value), \semi, semiMap.map(semi1Slider.value), \fine, fineMap.map(fine1Slider.value));
+	});
 
-semi1Slider=Slider(osc1SliderFlow, oscPitchSliderSize)
-.value_(0.5)
-.step_(1/22)
-.action_({
-	osc1freqDisp.string = ((octNumMap.map(oct1Slider.value).octcps) * (semiMap.map(semi1Slider.value).midiratio) * (fineMap.map(fine1Slider.value).midiratio)).round(0.01);
-	osc1SemiVal.value = semiMap.map(semi1Slider.value);
-		osc1Node.set(\freq, ((octNumMap.map(oct1Slider.value).octcps) * (semiMap.map(semi1Slider.value).midiratio) * (fineMap.map(fine1Slider.value).midiratio)));
-});
+	semi1Slider=Slider(osc1SliderFlow, oscPitchSliderSize)
+	.value_(0.5)
+	.step_(1/22)
+	.action_({
+		osc1freqDisp.string = ((octNumMap.map(oct1Slider.value).octcps) * (semiMap.map(semi1Slider.value).midiratio) * (fineMap.map(fine1Slider.value).midiratio)).round(0.01);
+		osc1SemiVal.value = semiMap.map(semi1Slider.value);
+		osc1Node.set(\oct, ~octaveMap.map(oct1Slider.value), \semi, semiMap.map(semi1Slider.value), \fine, fineMap.map(fine1Slider.value));
+	});
 
-fine1Slider=Slider(osc1SliderFlow, oscPitchSliderSize)
-.value_(0.5)
-.action_({
-	osc1freqDisp.string = ((octNumMap.map(oct1Slider.value).octcps) * (semiMap.map(semi1Slider.value).midiratio) * (fineMap.map(fine1Slider.value).midiratio)).round(0.01);
-	osc1FineVal.value = fineMap.map(fine1Slider.value);
-		osc1Node.set(\freq, ((octNumMap.map(oct1Slider.value).octcps) * (semiMap.map(semi1Slider.value).midiratio) * (fineMap.map(fine1Slider.value).midiratio)));
-});
+	fine1Slider=Slider(osc1SliderFlow, oscPitchSliderSize)
+	.value_(0.5)
+	.action_({
+		osc1freqDisp.string = ((octNumMap.map(oct1Slider.value).octcps) * (semiMap.map(semi1Slider.value).midiratio) * (fineMap.map(fine1Slider.value).midiratio)).round(0.01);
+		osc1FineVal.value = fineMap.map(fine1Slider.value);
+		osc1Node.set(\oct, ~octaveMap.map(oct1Slider.value), \semi, semiMap.map(semi1Slider.value), \fine, fineMap.map(fine1Slider.value));
+	});
 
-~osc1NumFlow = FlowView(osc1GUI, Rect(0, 219, oscGUIwidth, oscSliderFlowHeight+10), 23@0, 27@0);
+	~osc1NumFlow = FlowView(osc1GUI, Rect(0, 219, oscGUIwidth, oscSliderFlowHeight+10), 23@0, 27@0);
 
-osc1OctVal=NumberBox(~osc1NumFlow, 32@15)
-.value_(4)
-.font_(Font(size:10))
-.align_(\center)
-.clipHi_(8)
-.clipLo_(0)
-.action_({
-	oct1Slider.valueAction = osc1OctVal.value/8;
-});
+	osc1OctVal=NumberBox(~osc1NumFlow, 32@15)
+	.value_(4)
+	.font_(Font(size:10))
+	.align_(\center)
+	.clipHi_(8)
+	.clipLo_(0)
+	.action_({
+		oct1Slider.valueAction = osc1OctVal.value/8;
+	});
 
-osc1SemiVal=NumberBox(~osc1NumFlow, 32@15)
-.value_(0)
-.font_(Font(size:10))
-.align_(\center)
-.action_({
-	semi1Slider.valueAction = semiMap.unmap(osc1SemiVal.value);
-});
+	osc1SemiVal=NumberBox(~osc1NumFlow, 32@15)
+	.value_(0)
+	.font_(Font(size:10))
+	.align_(\center)
+	.action_({
+		semi1Slider.valueAction = semiMap.unmap(osc1SemiVal.value);
+	});
 
-osc1FineVal=NumberBox(~osc1NumFlow, 32@15)
-.value_(0)
-.font_(Font(size:10))
-.step_(0.01)
-.align_(\center)
-.action_({
-	fine1Slider.valueAction = fineMap.unmap(osc1FineVal.value);
-});
+	osc1FineVal=NumberBox(~osc1NumFlow, 32@15)
+	.value_(0)
+	.font_(Font(size:10))
+	.step_(0.01)
+	.align_(\center)
+	.action_({
+		fine1Slider.valueAction = fineMap.unmap(osc1FineVal.value);
+	});
 
-~osc1NumFlow.startRow;
+	~osc1NumFlow.startRow;
 
-StaticText(~osc1NumFlow, 32@15)
-.string_("OCT")
-.font_(Font(size:10))
-.align_(\center);
+	StaticText(~osc1NumFlow, 32@15)
+	.string_("OCT")
+	.font_(Font(size:10))
+	.align_(\center);
 
-StaticText(~osc1NumFlow, 32@15)
-.string_("SEMI")
-.font_(Font(size:10))
-.align_(\center);
+	StaticText(~osc1NumFlow, 32@15)
+	.string_("SEMI")
+	.font_(Font(size:10))
+	.align_(\center);
 
-StaticText(~osc1NumFlow, 32@15)
-.string_("FINE")
-.font_(Font(size:10))
-.align_(\center);
-
-
-///OSC2
+	StaticText(~osc1NumFlow, 32@15)
+	.string_("FINE")
+	.font_(Font(size:10))
+	.align_(\center);
 
 
-osc2SliderFlow = FlowView(osc2GUI, Rect(0, oscSliderFlowY, oscGUIwidth, oscSliderFlowHeight+10), oscSliderMargin@0, oscSliderGap@0);
+	///OSC2
 
-oct2Slider=Slider(osc2SliderFlow, oscPitchSliderSize)
-.value_(0.5)
-.step_(1/8)
-.action_({
-	osc2freqDisp.string = ((octNumMap.map(oct2Slider.value).octcps) * (semiMap.map(semi2Slider.value).midiratio) * (fineMap.map(fine2Slider.value).midiratio)).round(0.01);
-	osc2OctVal.value = octNumMap.map(oct2Slider.value);
-		osc2Node.set(\freq, ((octNumMap.map(oct2Slider.value).octcps) * (semiMap.map(semi2Slider.value).midiratio) * (fineMap.map(fine2Slider.value).midiratio)));
-});
 
-semi2Slider=Slider(osc2SliderFlow, oscPitchSliderSize)
-.value_(0.5)
-.step_(1/22)
-.action_({
-	osc2freqDisp.string = ((octNumMap.map(oct2Slider.value).octcps) * (semiMap.map(semi2Slider.value).midiratio) * (fineMap.map(fine2Slider.value).midiratio)).round(0.01);
-	osc2SemiVal.value = semiMap.map(semi2Slider.value);
-		osc2Node.set(\freq, ((octNumMap.map(oct2Slider.value).octcps) * (semiMap.map(semi2Slider.value).midiratio) * (fineMap.map(fine2Slider.value).midiratio)));
-});
+	osc2SliderFlow = FlowView(osc2GUI, Rect(0, oscSliderFlowY, oscGUIwidth, oscSliderFlowHeight+10), oscSliderMargin@0, oscSliderGap@0);
 
-fine2Slider=Slider(osc2SliderFlow, oscPitchSliderSize)
-.value_(0.5)
-.action_({
-	osc2freqDisp.string = ((octNumMap.map(oct2Slider.value).octcps) * (semiMap.map(semi2Slider.value).midiratio) * (fineMap.map(fine2Slider.value).midiratio)).round(0.01);
-	osc2FineVal.value = fineMap.map(fine2Slider.value);
-		osc2Node.set(\freq, ((octNumMap.map(oct2Slider.value).octcps) * (semiMap.map(semi2Slider.value).midiratio) * (fineMap.map(fine2Slider.value).midiratio)));
-});
+	oct2Slider=Slider(osc2SliderFlow, oscPitchSliderSize)
+	.value_(0.5)
+	.step_(1/8)
+	.action_({
+		osc2freqDisp.string = ((octNumMap.map(oct2Slider.value).octcps) * (semiMap.map(semi2Slider.value).midiratio) * (fineMap.map(fine2Slider.value).midiratio)).round(0.01);
+		osc2OctVal.value = octNumMap.map(oct2Slider.value);
+		osc2Node.set(\oct, ~octaveMap.map(oct2Slider.value), \semi, semiMap.map(semi2Slider.value), \fine, fineMap.map(fine2Slider.value));
+	});
 
-~osc2NumFlow = FlowView(osc2GUI, Rect(0, 219, oscGUIwidth, oscSliderFlowHeight+10), 23@0, 27@0);
+	semi2Slider=Slider(osc2SliderFlow, oscPitchSliderSize)
+	.value_(0.5)
+	.step_(1/22)
+	.action_({
+		osc2freqDisp.string = ((octNumMap.map(oct2Slider.value).octcps) * (semiMap.map(semi2Slider.value).midiratio) * (fineMap.map(fine2Slider.value).midiratio)).round(0.01);
+		osc2SemiVal.value = semiMap.map(semi2Slider.value);
+		osc2Node.set(\oct, ~octaveMap.map(oct2Slider.value), \semi, semiMap.map(semi2Slider.value), \fine, fineMap.map(fine2Slider.value));
+	});
 
-osc2OctVal=NumberBox(~osc2NumFlow, 32@15)
-.string_(4)
-.font_(Font(size:10))
-.align_(\center)
-.clipHi_(8)
-.clipLo_(0)
-.action_({
-	oct2Slider.valueAction = osc2OctVal.value/8;
-});
+	fine2Slider=Slider(osc2SliderFlow, oscPitchSliderSize)
+	.value_(0.5)
+	.action_({
+		osc2freqDisp.string = ((octNumMap.map(oct2Slider.value).octcps) * (semiMap.map(semi2Slider.value).midiratio) * (fineMap.map(fine2Slider.value).midiratio)).round(0.01);
+		osc2FineVal.value = fineMap.map(fine2Slider.value);
+		osc2Node.set(\oct, ~octaveMap.map(oct2Slider.value), \semi, semiMap.map(semi2Slider.value), \fine, fineMap.map(fine2Slider.value));
+	});
 
-osc2SemiVal=NumberBox(~osc2NumFlow, 32@15)
-.value_(0)
-.font_(Font(size:10))
-.align_(\center)
-.action_({
-	semi2Slider.valueAction = semiMap.unmap(osc2SemiVal.value);
-});
+	~osc2NumFlow = FlowView(osc2GUI, Rect(0, 219, oscGUIwidth, oscSliderFlowHeight+10), 23@0, 27@0);
 
-osc2FineVal=NumberBox(~osc2NumFlow, 32@15)
-.value_(0)
-.font_(Font(size:10))
-.step_(0.01)
-.align_(\center)
-.action_({
-	fine2Slider.valueAction = fineMap.unmap(osc2FineVal.value);
-});
+	osc2OctVal=NumberBox(~osc2NumFlow, 32@15)
+	.string_(4)
+	.font_(Font(size:10))
+	.align_(\center)
+	.clipHi_(8)
+	.clipLo_(0)
+	.action_({
+		oct2Slider.valueAction = osc2OctVal.value/8;
+	});
 
-~osc2NumFlow.startRow;
+	osc2SemiVal=NumberBox(~osc2NumFlow, 32@15)
+	.value_(0)
+	.font_(Font(size:10))
+	.align_(\center)
+	.action_({
+		semi2Slider.valueAction = semiMap.unmap(osc2SemiVal.value);
+	});
 
-StaticText(~osc2NumFlow, 32@15)
-.string_("OCT")
-.font_(Font(size:10))
-.align_(\center);
+	osc2FineVal=NumberBox(~osc2NumFlow, 32@15)
+	.value_(0)
+	.font_(Font(size:10))
+	.step_(0.01)
+	.align_(\center)
+	.action_({
+		fine2Slider.valueAction = fineMap.unmap(osc2FineVal.value);
+	});
 
-StaticText(~osc2NumFlow, 32@15)
-.string_("SEMI")
-.font_(Font(size:10))
-.align_(\center);
+	~osc2NumFlow.startRow;
 
-StaticText(~osc2NumFlow, 32@15)
-.string_("FINE")
-.font_(Font(size:10))
-.align_(\center);
+	StaticText(~osc2NumFlow, 32@15)
+	.string_("OCT")
+	.font_(Font(size:10))
+	.align_(\center);
 
-///OSC3
+	StaticText(~osc2NumFlow, 32@15)
+	.string_("SEMI")
+	.font_(Font(size:10))
+	.align_(\center);
 
-osc3SliderFlow = FlowView(osc3GUI, Rect(0, oscSliderFlowY, oscGUIwidth, oscSliderFlowHeight+10), oscSliderMargin@0, oscSliderGap@0);
+	StaticText(~osc2NumFlow, 32@15)
+	.string_("FINE")
+	.font_(Font(size:10))
+	.align_(\center);
 
-oct3Slider=Slider(osc3SliderFlow, oscPitchSliderSize)
-.value_(0.5)
-.step_(1/8)
-.action_({
-	osc3freqDisp.string = ((octNumMap.map(oct3Slider.value).octcps) * (semiMap.map(semi3Slider.value).midiratio) * (fineMap.map(fine3Slider.value).midiratio)).round(0.01);
-	osc3OctVal.value = octNumMap.map(oct3Slider.value);
-		osc3Node.set(\freq, ((octNumMap.map(oct3Slider.value).octcps) * (semiMap.map(semi3Slider.value).midiratio) * (fineMap.map(fine3Slider.value).midiratio)));
-});
+	///OSC3
 
-semi3Slider=Slider(osc3SliderFlow, oscPitchSliderSize)
-.value_(0.5)
-.step_(1/22)
-.action_({
-	osc3freqDisp.string = ((octNumMap.map(oct3Slider.value).octcps) * (semiMap.map(semi3Slider.value).midiratio) * (fineMap.map(fine3Slider.value).midiratio)).round(0.01);
-	osc3SemiVal.value = semiMap.map(semi3Slider.value);
-		osc3Node.set(\freq, ((octNumMap.map(oct3Slider.value).octcps) * (semiMap.map(semi3Slider.value).midiratio) * (fineMap.map(fine3Slider.value).midiratio)));
-});
+	osc3SliderFlow = FlowView(osc3GUI, Rect(0, oscSliderFlowY, oscGUIwidth, oscSliderFlowHeight+10), oscSliderMargin@0, oscSliderGap@0);
 
-fine3Slider=Slider(osc3SliderFlow, oscPitchSliderSize)
-.value_(0.5)
-.action_({
-	osc3freqDisp.string = ((octNumMap.map(oct3Slider.value).octcps) * (semiMap.map(semi3Slider.value).midiratio) * (fineMap.map(fine3Slider.value).midiratio)).round(0.01);
-	osc3FineVal.value = fineMap.map(fine3Slider.value);
-		osc3Node.set(\freq, ((octNumMap.map(oct3Slider.value).octcps) * (semiMap.map(semi3Slider.value).midiratio) * (fineMap.map(fine3Slider.value).midiratio)));
-});
+	oct3Slider=Slider(osc3SliderFlow, oscPitchSliderSize)
+	.value_(0.5)
+	.step_(1/8)
+	.action_({
+		osc3freqDisp.string = ((octNumMap.map(oct3Slider.value).octcps) * (semiMap.map(semi3Slider.value).midiratio) * (fineMap.map(fine3Slider.value).midiratio)).round(0.01);
+		osc3OctVal.value = octNumMap.map(oct3Slider.value);
+		osc3Node.set(\oct, ~octaveMap.map(oct3Slider.value), \semi, semiMap.map(semi3Slider.value), \fine, fineMap.map(fine3Slider.value));
+	});
 
-~osc3NumFlow = FlowView(osc3GUI, Rect(0, 219, oscGUIwidth, oscSliderFlowHeight+10), 23@0, 27@0);
+	semi3Slider=Slider(osc3SliderFlow, oscPitchSliderSize)
+	.value_(0.5)
+	.step_(1/22)
+	.action_({
+		osc3freqDisp.string = ((octNumMap.map(oct3Slider.value).octcps) * (semiMap.map(semi3Slider.value).midiratio) * (fineMap.map(fine3Slider.value).midiratio)).round(0.01);
+		osc3SemiVal.value = semiMap.map(semi3Slider.value);
+		osc3Node.set(\oct, ~octaveMap.map(oct3Slider.value), \semi, semiMap.map(semi3Slider.value), \fine, fineMap.map(fine3Slider.value));
+	});
 
-osc3OctVal=NumberBox(~osc3NumFlow, 32@15)
-.string_(4)
-.font_(Font(size:10))
-.align_(\center)
-.clipHi_(8)
-.clipLo_(0)
-.action_({
-	oct3Slider.valueAction = osc3OctVal.value/8;
-});
+	fine3Slider=Slider(osc3SliderFlow, oscPitchSliderSize)
+	.value_(0.5)
+	.action_({
+		osc3freqDisp.string = ((octNumMap.map(oct3Slider.value).octcps) * (semiMap.map(semi3Slider.value).midiratio) * (fineMap.map(fine3Slider.value).midiratio)).round(0.01);
+		osc3FineVal.value = fineMap.map(fine3Slider.value);
+		osc3Node.set(\oct, ~octaveMap.map(oct3Slider.value), \semi, semiMap.map(semi3Slider.value), \fine, fineMap.map(fine3Slider.value));
+	});
 
-osc3SemiVal=NumberBox(~osc3NumFlow, 32@15)
-.value_(0)
-.font_(Font(size:10))
-.align_(\center)
-.action_({
-	semi3Slider.valueAction = semiMap.unmap(osc3SemiVal.value);
-});
+	~osc3NumFlow = FlowView(osc3GUI, Rect(0, 219, oscGUIwidth, oscSliderFlowHeight+10), 23@0, 27@0);
 
-osc3FineVal=NumberBox(~osc3NumFlow, 32@15)
-.value_(0)
-.font_(Font(size:10))
-.step_(0.01)
-.align_(\center)
-.action_({
-	fine3Slider.valueAction = fineMap.unmap(osc3FineVal.value);
-});
+	osc3OctVal=NumberBox(~osc3NumFlow, 32@15)
+	.value_(4)
+	.font_(Font(size:10))
+	.align_(\center)
+	.clipHi_(8)
+	.clipLo_(0)
+	.action_({
+		oct3Slider.valueAction = osc3OctVal.value/8;
+	});
 
-~osc3NumFlow.startRow;
+	osc3SemiVal=NumberBox(~osc3NumFlow, 32@15)
+	.value_(0)
+	.font_(Font(size:10))
+	.align_(\center)
+	.action_({
+		semi3Slider.valueAction = semiMap.unmap(osc3SemiVal.value);
+	});
 
-StaticText(~osc3NumFlow, 32@15)
-.string_("OCT")
-.font_(Font(size:10))
-.align_(\center);
+	osc3FineVal=NumberBox(~osc3NumFlow, 32@15)
+	.value_(0)
+	.font_(Font(size:10))
+	.step_(0.01)
+	.align_(\center)
+	.action_({
+		fine3Slider.valueAction = fineMap.unmap(osc3FineVal.value);
+	});
 
-StaticText(~osc3NumFlow, 32@15)
-.string_("SEMI")
-.font_(Font(size:10))
-.align_(\center);
+	~osc3NumFlow.startRow;
 
-StaticText(~osc3NumFlow, 32@15)
-.string_("FINE")
-.font_(Font(size:10))
-.align_(\center);
+	StaticText(~osc3NumFlow, 32@15)
+	.string_("OCT")
+	.font_(Font(size:10))
+	.align_(\center);
 
-//Shape Slider
+	StaticText(~osc3NumFlow, 32@15)
+	.string_("SEMI")
+	.font_(Font(size:10))
+	.align_(\center);
 
-osc1ShapeSlider = Slider(osc1GUI, Rect(oscGUIwidth-oscSliderSize/2, shapeSliderY, oscSliderSize, shapeSliderHeight))
-.value_(0)
-		.action_({
+	StaticText(~osc3NumFlow, 32@15)
+	.string_("FINE")
+	.font_(Font(size:10))
+	.align_(\center);
+
+	//Shape Slider
+
+	osc1ShapeSlider = Slider(osc1GUI, Rect(oscGUIwidth-oscSliderSize/2, shapeSliderY, oscSliderSize, shapeSliderHeight))
+	.step_(0.01)
+	.shift_scale_(100/3)
+	.value_(0)
+	.action_({
 		osc1Node.set(\shape, osc1ShapeSlider.value*3)
 	});
 
-osc2ShapeSlider = Slider(osc2GUI, Rect(oscGUIwidth-oscSliderSize/2, shapeSliderY, oscSliderSize, shapeSliderHeight))
-.value_(0)
-			.action_({
+	osc2ShapeSlider = Slider(osc2GUI, Rect(oscGUIwidth-oscSliderSize/2, shapeSliderY, oscSliderSize, shapeSliderHeight))
+	.step_(0.01)
+	.shift_scale_(100/3)
+	.value_(0)
+	.action_({
 		osc2Node.set(\shape, osc2ShapeSlider.value*3
 	)});
 
-osc3ShapeSlider = Slider(osc3GUI, Rect(oscGUIwidth-oscSliderSize/2, shapeSliderY, oscSliderSize, shapeSliderHeight))
-.value_(0)
-			.action_({
+	osc3ShapeSlider = Slider(osc3GUI, Rect(oscGUIwidth-oscSliderSize/2, shapeSliderY, oscSliderSize, shapeSliderHeight))
+	.step_(0.01)
+	.shift_scale_(100/3)
+	.value_(0)
+	.action_({
 		osc3Node.set(\shape, osc3ShapeSlider.value*3)
 	});
 
-//Shape Label
+	//Shape Label
 
-osc1ShapeLabel = StaticText(osc1GUI, Rect(0, shapeLabelY, oscGUIwidth, oscSliderLabelHeight))
-.string_("Shape")
-.font_(Font(size:12))
-.align_(\center);
+	osc1ShapeLabel = StaticText(osc1GUI, Rect(0, shapeLabelY, oscGUIwidth, oscSliderLabelHeight))
+	.string_("Shape")
+	.font_(Font(size:12))
+	.align_(\center);
 
-osc2ShapeLabel = StaticText(osc2GUI, Rect(0, shapeLabelY, oscGUIwidth, oscSliderLabelHeight))
-.string_("Shape")
-.font_(Font(size:12))
-.align_(\center);
+	osc2ShapeLabel = StaticText(osc2GUI, Rect(0, shapeLabelY, oscGUIwidth, oscSliderLabelHeight))
+	.string_("Shape")
+	.font_(Font(size:12))
+	.align_(\center);
 
-osc1ShapeLabel = StaticText(osc3GUI, Rect(0, shapeLabelY, oscGUIwidth, oscSliderLabelHeight))
-.string_("Shape")
-.font_(Font(size:12))
-.align_(\center);
+	osc1ShapeLabel = StaticText(osc3GUI, Rect(0, shapeLabelY, oscGUIwidth, oscSliderLabelHeight))
+	.string_("Shape")
+	.font_(Font(size:12))
+	.align_(\center);
 
-//PW Slider
+	//PW Slider
 
-osc1WidthSlider = Slider(osc1GUI, Rect(oscGUIwidth-oscSliderSize/2, widthSliderY, oscSliderSize, shapeSliderHeight))
-.value_(0.5)
+	osc1WidthSlider = Slider(osc1GUI, Rect(oscGUIwidth-oscSliderSize/2, widthSliderY, oscSliderSize, shapeSliderHeight))
+	.value_(0.5)
 	.action_({
 		osc1Node.set(\width, osc1WidthSlider.value.range(0.1,0.9)
 	)});
 
-osc2WidthSlider = Slider(osc2GUI, Rect(oscGUIwidth-oscSliderSize/2, widthSliderY, oscSliderSize, shapeSliderHeight))
-.value_(0.5)
-		.action_({
+	osc2WidthSlider = Slider(osc2GUI, Rect(oscGUIwidth-oscSliderSize/2, widthSliderY, oscSliderSize, shapeSliderHeight))
+	.value_(0.5)
+	.action_({
 		osc2Node.set(\width, osc2WidthSlider.value.range(0.1,0.9)
 	)});
 
-osc3WidthSlider = Slider(osc3GUI, Rect(oscGUIwidth-oscSliderSize/2, widthSliderY, oscSliderSize, shapeSliderHeight))
-.value_(0.5)
-		.action_({
+	osc3WidthSlider = Slider(osc3GUI, Rect(oscGUIwidth-oscSliderSize/2, widthSliderY, oscSliderSize, shapeSliderHeight))
+	.value_(0.5)
+	.action_({
 		osc3Node.set(\width, osc3WidthSlider.value.range(0.1,0.9)
 	)});
 
-//PW Label
+	//PW Label
 
-osc1WidthLabel = StaticText(osc1GUI, Rect(0, widthLabelY, oscGUIwidth, oscSliderLabelHeight))
-.string_("Pulse Width")
-.font_(Font(size:12))
-.align_(\center);
+	osc1WidthLabel = StaticText(osc1GUI, Rect(0, widthLabelY, oscGUIwidth, oscSliderLabelHeight))
+	.string_("Pulse Width")
+	.font_(Font(size:12))
+	.align_(\center);
 
-osc2WidthLabel = StaticText(osc2GUI, Rect(0, widthLabelY, oscGUIwidth, oscSliderLabelHeight))
-.string_("Pulse Width")
-.font_(Font(size:12))
-.align_(\center);
+	osc2WidthLabel = StaticText(osc2GUI, Rect(0, widthLabelY, oscGUIwidth, oscSliderLabelHeight))
+	.string_("Pulse Width")
+	.font_(Font(size:12))
+	.align_(\center);
 
-osc1WidthLabel = StaticText(osc3GUI, Rect(0, widthLabelY, oscGUIwidth, oscSliderLabelHeight))
-.string_("Pulse Width")
-.font_(Font(size:12))
-.align_(\center);
-
-
-
-
-
-
-
-////////////////////////FILTER/////////////////////////////
+	osc1WidthLabel = StaticText(osc3GUI, Rect(0, widthLabelY, oscGUIwidth, oscSliderLabelHeight))
+	.string_("Pulse Width")
+	.font_(Font(size:12))
+	.align_(\center);
 
 
 
@@ -907,49 +915,57 @@ osc1WidthLabel = StaticText(osc3GUI, Rect(0, widthLabelY, oscGUIwidth, oscSlider
 
 
 
+	////////////////////////FILTER/////////////////////////////
 
 
-filtGUI = View(win, Rect(filtGUIx,filtGUIy,filtGUIwidth,filtGUIheight))
-.background_(Color.grey(greyness));
 
-cutoffKnob=Knob(filtGUI, Rect(filtGUIwidth-cutoffKnobSize/2, cutoffKnobY, cutoffKnobSize, cutoffKnobSize))
-.value_(~filterMap.unmap(1000))
-.action_({
-	cfBox.value = ~filterMap.map(cutoffKnob.value);
+
+
+
+
+
+
+	filtGUI = View(win, Rect(filtGUIx,filtGUIy,filtGUIwidth,filtGUIheight))
+	.background_(Color.grey(greyness));
+
+	cutoffKnob=Knob(filtGUI, Rect(filtGUIwidth-cutoffKnobSize/2, cutoffKnobY, cutoffKnobSize, cutoffKnobSize))
+	.value_(~filterMap.unmap(1000))
+	.action_({
+		cfBox.value = ~filterMap.map(cutoffKnob.value);
 		filtNode.set(\freq, ~filterMap.map(cutoffKnob.value))
-});
+	});
 
-cfBox = NumberBox(filtGUI, Rect(filtGUIwidth-108/2, 170, 108, 20))
-.value_(1000)
-.clipHi_(20000)
-.clipLo_(20)
-.decimals_(2)
-.align_(\center)
-.action_({
-	cutoffKnob.value = ~filterMap.unmap(cfBox.value);
+	cfBox = NumberBox(filtGUI, Rect(filtGUIwidth-108/2, 170, 108, 20))
+	.value_(1000)
+	.clipHi_(20000)
+	.clipLo_(20)
+	.decimals_(2)
+	.align_(\center)
+	.action_({
+		cutoffKnob.value = ~filterMap.unmap(cfBox.value);
 		filtNode.set(\freq, ~filterMap.map(cutoffKnob.value))
-});
+	});
 
-resKnob=Knob(filtGUI, Rect(filtGUIwidth-resKnobSize/2, resKnobY, resKnobSize, resKnobSize))
-.action_({
-	resBox.value = resKnob.value;
+	resKnob=Knob(filtGUI, Rect(filtGUIwidth-resKnobSize/2, resKnobY, resKnobSize, resKnobSize))
+	.action_({
+		resBox.value = resKnob.value;
 		filtNode.set(\rq, ~resMap.map(resKnob.value))
-});
+	});
 
-resBox = NumberBox(filtGUI, Rect(filtGUIwidth-40/2, 256, 40, 20))
-.value_(0.0)
-.decimals_(2)
-.align_(\center)
-.action_({
-	cutoffKnob.value = cfBox.value;
+	resBox = NumberBox(filtGUI, Rect(filtGUIwidth-40/2, 256, 40, 20))
+	.value_(0.0)
+	.decimals_(2)
+	.align_(\center)
+	.action_({
+		cutoffKnob.value = cfBox.value;
 		filtNode.set(\rq, ~resMap.map(resKnob.value))
-});
+	});
 
-filtSelectWidget = PopUpMenu(filtGUI, Rect(filtGUIwidth-90/2, filtSelectY, 90, 20))
+	filtSelectWidget = PopUpMenu(filtGUI, Rect(filtGUIwidth-90/2, filtSelectY, 90, 20))
 	.items_(["Lowpass", "Highpass", "Bandpass"])
 	.action_({
 		filtNode.set(\filtSel, filtSelectWidget.value)
-});
+	});
 
 
 
@@ -965,36 +981,36 @@ filtSelectWidget = PopUpMenu(filtGUI, Rect(filtGUIwidth-90/2, filtSelectY, 90, 2
 	filtEnvGUI = View(win, Rect(filtEnvGUIx,filtEnvGUIy,filtEnvGUIwidth,filtEnvGUIheight))
 	.background_(Color.grey(greyness));
 
-filtEnvCurveSlider=Slider(filtEnvGUI, Rect(4, 108, 192, 15))
-.value_(0.5)
+	filtEnvCurveSlider=Slider(filtEnvGUI, Rect(4, 108, 192, 15))
+	.value_(0.5)
 	.action_({
-	filtEnvWidget.curves_(~curveMap.map(filtEnvCurveSlider.value));
+		filtEnvWidget.curves_(~curveMap.map(filtEnvCurveSlider.value));
 		filtNode.set(\curve, ~curveMap.map(filtEnvCurveSlider.value));
 	});
 
-~filtEnvKnob = Knob(filtEnvGUI, Rect(200+(220-mulKnobSize/2), 310-mulKnobSize/2, mulKnobSize, mulKnobSize))
-.value_(0.5)
+	~filtEnvKnob = Knob(filtEnvGUI, Rect(200+(220-mulKnobSize/2), 310-mulKnobSize/2, mulKnobSize, mulKnobSize))
+	.value_(0.5)
 	.step_(0.01)
 	.shift_scale_(50)
 	.alt_scale_(0.05)
-.action_({
+	.action_({
 		filtNode.set(\peak, ~filtCVMap.map(~filtEnvKnob.value));
 		~filtValBox.value_(~filtCVMap.map(~filtEnvKnob.value));
-});
-	
+	});
+
 	~filtValBox = NumberBox(filtEnvGUI, Rect(200+(220-60/2), 240, 60, 20))
 	.value_(0.5)
 	.align_(\center)
 	.decimals_(2)
-.action_({
+	.action_({
 		~filtEnvKnob.valueAction_(~filtCVMap.unmap(~filtValBox.value));
-});
+	});
 
-filtEnvGUI.decorator_(FlowLayout(Rect(filtEnvGUIx, filtEnvGUIy, 200, 310)));
+	filtEnvGUI.decorator_(FlowLayout(Rect(filtEnvGUIx, filtEnvGUIy, 200, 310)));
 
 
-filtEnvWidget=EnvelopeView(filtEnvGUI,Rect(4,4,192,100))
-.setEnv(Env.adsr(curve:0))
+	filtEnvWidget=EnvelopeView(filtEnvGUI,Rect(4,4,192,100))
+	.setEnv(Env.adsr(curve:0))
 	.keepHorizontalOrder_(true)
 	.editable_(false)
 	.drawRects_(false);
@@ -1004,21 +1020,21 @@ filtEnvWidget=EnvelopeView(filtEnvGUI,Rect(4,4,192,100))
 
 
 	filtEnvASlider = Slider(filtEnvGUI, 20@130)
-.value_(~envMap.unmap(0.01))
+	.value_(~envMap.unmap(0.01))
 	.action_({
 		var val;
-	val = ~envMap.map(filtEnvASlider.value);
+		val = ~envMap.map(filtEnvASlider.value);
 		filtEnvWidget
-	.setEnv(Env.adsr(~envMap.map(filtEnvASlider.value), ~envMap.map(filtEnvDSlider.value), filtEnvSSlider.value, ~envMap.map(filtEnvRSlider.value), curve:~curveMap.map(filtEnvCurveSlider.value)));
+		.setEnv(Env.adsr(~envMap.map(filtEnvASlider.value), ~envMap.map(filtEnvDSlider.value), filtEnvSSlider.value, ~envMap.map(filtEnvRSlider.value), curve:~curveMap.map(filtEnvCurveSlider.value)));
 		filtEnvAVal.value = val;
 		filtNode.set(\atk, val);
 	});
 
 	filtEnvDSlider = Slider(filtEnvGUI, 20@130)
 	.value_(~envMap.unmap(0.3))
-.action_({
+	.action_({
 		var val;
-	val = ~envMap.map(filtEnvDSlider.value);
+		val = ~envMap.map(filtEnvDSlider.value);
 		filtEnvWidget.setEnv(Env.adsr(~envMap.map(filtEnvASlider.value), ~envMap.map(filtEnvDSlider.value), filtEnvSSlider.value, ~envMap.map(filtEnvRSlider.value), curve:~curveMap.map(filtEnvCurveSlider.value)));
 		filtEnvDVal.value_(val);
 		filtNode.set(\dec, val);
@@ -1031,14 +1047,14 @@ filtEnvWidget=EnvelopeView(filtEnvGUI,Rect(4,4,192,100))
 		val = filtEnvSSlider.value;
 		filtEnvWidget.setEnv(Env.adsr(~envMap.map(filtEnvASlider.value), ~envMap.map(filtEnvDSlider.value), filtEnvSSlider.value, ~envMap.map(filtEnvRSlider.value), curve:~curveMap.map(filtEnvCurveSlider.value)));
 		filtEnvSVal.value_(filtEnvSSlider.value);
-	filtNode.set(\sus, val);
+		filtNode.set(\sus, val);
 	});
 
 	filtEnvRSlider = Slider(filtEnvGUI, 20@130)
-.value_(~envMap.unmap(1.0))
-.action_({
+	.value_(~envMap.unmap(1.0))
+	.action_({
 		var val;
-	val = ~envMap.map(filtEnvRSlider.value);
+		val = ~envMap.map(filtEnvRSlider.value);
 		filtEnvWidget.setEnv(Env.adsr(~envMap.map(filtEnvASlider.value), ~envMap.map(filtEnvDSlider.value), filtEnvSSlider.value, ~envMap.map(filtEnvRSlider.value), curve:~curveMap.map(filtEnvCurveSlider.value)));
 		filtEnvRVal.value_(val);
 		filtNode.set(\rel, val);
@@ -1053,28 +1069,28 @@ filtEnvWidget=EnvelopeView(filtEnvGUI,Rect(4,4,192,100))
 	.maxDecimals_(3)
 	.clipLo_(0.001)
 	.clipHi_(10.0)
-.action_({
+	.action_({
 		var val, slidVal;
 		val=filtEnvAVal.value;
-	slidVal=~envMap.unmap(val);
+		slidVal=~envMap.unmap(val);
 		filtEnvASlider.valueAction_(slidVal);
 	});
 
-filtEnvDVal=NumberBox(filtEnvGUI, 35@15)
+	filtEnvDVal=NumberBox(filtEnvGUI, 35@15)
 	.value_(0.3)
 	.font_(Font(size:10))
 	.align_(\center)
 	.maxDecimals_(3)
 	.clipLo_(0.001)
 	.clipHi_(10.0)
-.action_({
+	.action_({
 		var val, slidVal;
 		val=filtEnvDVal.value;
-	slidVal=~envMap.unmap(val);
+		slidVal=~envMap.unmap(val);
 		filtEnvDSlider.valueAction_(slidVal);
 	});
 
-filtEnvSVal=NumberBox(filtEnvGUI, 35@15)
+	filtEnvSVal=NumberBox(filtEnvGUI, 35@15)
 	.value_(0.5)
 	.font_(Font(size:10))
 	.align_(\center)
@@ -1086,17 +1102,17 @@ filtEnvSVal=NumberBox(filtEnvGUI, 35@15)
 		filtEnvSSlider.valueAction_(val);
 	});
 
-filtEnvRVal=NumberBox(filtEnvGUI, 35@15)
+	filtEnvRVal=NumberBox(filtEnvGUI, 35@15)
 	.value_(1.0)
 	.font_(Font(size:10))
 	.align_(\center)
 	.maxDecimals_(3)
 	.clipLo_(0.001)
 	.clipHi_(10.0)
-.action_({
+	.action_({
 		var val, slidVal;
 		val=filtEnvRVal.value;
-	slidVal=~envMap.unmap(val);
+		slidVal=~envMap.unmap(val);
 		filtEnvRSlider.valueAction_(slidVal);
 	});
 
@@ -1107,5 +1123,147 @@ filtEnvRVal=NumberBox(filtEnvGUI, 35@15)
 	StaticText(filtEnvGUI, 21@10).string_("Sus").font_(Font(size:11, bold:true)).align_(\center);
 	StaticText(filtEnvGUI, 21@10).string_("Rel").font_(Font(size:11, bold:true)).align_(\center);
 
+
+
+	////////////////////////////SLEW LIMITER///////////////////////////////
+
+
+	~slewMap = ControlSpec(0.0, 5.0, 4);
+
+
+	~slewLimiterGUI = View(win, Rect(680, 90, 100, 240)).background_(Color.grey(greyness));
+	~slewLimiter = Slider(~slewLimiterGUI, Rect(100-20/2, 15, 20, 160))
+	.value_(0)
+	.step_(~slewMap.unmap(0.001))
+	.action_({
+		~slewVal.value = ~slewMap.map(~slewLimiter.value);
+		~sigGrp.set(\lag, ~slewMap.map(~slewLimiter.value));
+	});
+	~slewVal = NumberBox(~slewLimiterGUI, Rect(100-50/2, 185, 50, 20))
+	.decimals_(3)
+	.align_(\center)
+	.action_({
+		~slewLimiter.valueAction_(~slewMap.unmap(~slewVal.value));
+	});
+
+	StaticText(~slewLimiterGUI, Rect(100-80/2, 210, 80, 20))
+	.string_("Slew Limiter")
+	.align_(\center);
+
+
+
+		////////////////////////////SLEW LIMITER///////////////////////////////
+
+	~noiseGUI = View(win, Rect(680, 20, 100, 60)).background_(Color.grey(greyness));
+
+	~noiseWidget = MultiSliderView(~noiseGUI, Rect(20, 20, 60, 30))
+	.thumbSize_(27)
+	.step_(1)
+	.size_(1)
+	.elasticMode_(0)
+	.gap_(0)
+	.indexIsHorizontal_(false)
+	.background_(Color.grey(0.5))
+	.colors_(Color.white,Color.white)
+	.currentvalue_(0)
+	.action_({
+		var val, colors;
+		val = ~noiseWidget.currentvalue;
+		colors = [Color.white, Color.fromHexString("#ffcccc")];
+		~noiseWidget.colors_(colors@val, colors@val);
+		noiseNode.set(\noiseSel, val);
+	});
+
+	StaticText(~noiseGUI, Rect(0, 0, 100, 20))
+	.string_("Noise")
+	.align_(\center);
+
+	StaticText(~noiseGUI, Rect(5, 25, 20, 20))
+	.string_("W")
+	.align_(\left);
+
+	StaticText(~noiseGUI, Rect(72, 25, 20, 20))
+	.string_("P")
+	.align_(\right);
+
+
+
+
+	s.sync;
+
+
+
+
+
+	////////////////////////MIDI/////////////////////////
+
+
+
+
+
+~ewi = -1951946844;
+~touchbar = -607326372;
+
+
+
+
+
+	////////////////////////////Settings GUI///////////////////////////////
+
+
+
+
+	~settingsGUI = View(win, Rect(800, 20, 300, 310)).background_(Color.grey(greyness));
+
+	View(win, Rect(800, 60, 300, 10)).background_(Color.white);
+
+
+	///MIDI select
+
+
+	// ~midiSelect = PopUpMenu(~settingsGUI, Rect(10, 10, 100, 20))
+	// .items_(["MIDI Source", "Keyboard", "EWI"]);
+
+	MIDIdef.noteOn(\ewiNoteOn, {
+					arg vel, num;
+					osc1Node.set(\freq, num.midicps);
+					osc2Node.set(\freq, num.midicps);
+					osc3Node.set(\freq, num.midicps);
+				});
+
+	MIDIdef.cc(\breath, {
+					arg val;
+					mixNode.set(\gate, val);
+					filtNode.set(\gate, val);
+				});
+
+	~presets = PopUpMenu(~settingsGUI, Rect(70, 10, 220, 20));
+
+
+	StaticText(~settingsGUI, Rect(10, 10, 60, 20))
+	.string_("Presets:")
+	.font_(Font(bold:true));
+
+
+s.sync;
+
+////Scope
+
+	// ~scopeBuf = Buffer.alloc(s,1024,1);
+	//
+	// SynthDef(\scope, {
+	// 	arg bus, bufnum;
+	// 	var sig;
+	// 	sig = In.ar(bus, 1);
+	// 	ScopeOut2.ar(sig, bufnum);
+	// });
+	//
+	//
+	// ~scope = ScopeView(~settingsGUI, Rect(10, 160, 280, 140))
+	// .server_(s);
+
+
 });
+
+
 )
