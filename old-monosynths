@@ -1,0 +1,271 @@
+(
+s = Server.local;
+s.options.outDevice_(
+	"Built-in Output"
+	//"ZoomAudioD"
+);
+s.options.numInputBusChannels_(0); ///Because I get really annoyed when something changes my input sample rate
+s.options.sampleRate_(44100); ///And 44.1 kHz is the girl of my dreams
+s.waitForBoot({
+
+MIDIClient.init;
+MIDIIn.connectAll;
+
+/////////////////// This is the line to change synth voices /////////////////////
+
+v = MonoPortaVoicer(1, "flashlight");
+
+// Substitute the contents of the "" for any of the following names. They are case sensitive, so copy/paste is probably best:
+
+// flashlight
+// funkenstein
+// thump
+// diamond
+// wonderbass
+// supersaw
+// ssbass
+// supersquare
+// ssqbass
+// fmsquare
+
+///////////////////////////////////////////////////////////////////////////////
+
+
+v.portaTime = 0.2;
+v.mapGlobal(\bend, nil, 0, [-2,2]);
+v.mapGlobal(\mod, nil, 0, [0,1]);
+v.mapGlobal(\vol, nil, 0, [0,1]);
+
+MIDIdef.noteOn(\on, {
+	arg vel, num;
+	v.trigger(num.midicps, vel.lincurve(0,127,0,1,-4));
+});
+
+MIDIdef.bend(\pitchbend, {
+	arg val;
+	~bend = val;
+	v.set([\bend, val.linlin(0,16383,-2,2)]);
+}, chan:0);
+
+MIDIdef.cc(\modwheel, {
+	arg vel;
+	~mod = vel.linlin(0,127,0,1);
+	v.set([\mod, ~mod]);
+},1,0);
+
+MIDIdef.cc(\volSlider, {
+	arg vel;
+	~vol = vel.linlin(0,127,0,1);
+	v.set([\vol, ~vol]);
+},7,0);
+
+MIDIdef.noteOff(\off, {
+	arg vel, num;
+	v.release(num.midicps);
+});
+
+
+SynthDef(\flashlight, {
+	arg out, gate = 1,
+	freq = 261.61, freqlag = 0.1, detun = 1.008, pan = 0, bend=0,
+	ffreq = 1200, ffreqMul = 4, fAtk = 0.005, fDec = 0.01,
+	atk = 0.005, dcy = 0.2, sus = 0.6, rel = 0.1, mod=0, vol=0.8;
+
+	var res = vol.linlin(0,1,0,3.9);
+
+	var amp = Latch.kr(gate, gate).linlin(0, 1, 0.05, 0.25);
+
+	var peak = freq * ffreqMul;
+
+	var	lfo = LFTri.kr(6, 0, 24*(mod.midiratio - 1));
+	var pitch = freq * lfo.midiratio;
+
+	var freqs = Lag.kr(pitch * [0.15.midiratio,0.5] * bend.midiratio, freqlag);
+
+	var filtEnv = EnvGen.ar(Env.adsr(fAtk, fDec, 1, fDec, peak.clip(10,20000), -4, ffreq), doneAction:2);
+	var ampenv = EnvGen.ar(Env.adsr(atk, dcy, sus, rel), gate, doneAction: 2);
+
+	var sig = SawDPW.ar(freqs, mul:0.1);
+
+	sig = MoogFF.ar(sig, filtEnv, res, mul:25.dbamp);
+
+	Out.ar(out, Pan2.ar(sig, pan, amp * ampenv));
+}).add;
+
+SynthDef(\funkenstein, {
+	arg out, gate=1, freq=261.63, freqlag=0.3, pan=0, bend=0, ffreq=112.6, vol=2, ffreqMul=4.5, fAtk=0.1, fDec=0.4, fSus=0.6, atk=0.001, dec=0.05, sus=0.6, mod=0;
+
+	var	lfo = LFTri.kr(6, 0, 24*(mod.midiratio - 1));
+	var pitch = Lag.kr(freq * lfo.midiratio * bend.midiratio, freqlag);
+
+	var amp = Latch.kr(gate, gate).linlin(0, 1, 0.05, 0.25);
+	var ampEnv = EnvGen.ar(Env.adsr(atk, dec, sus, dec), gate, doneAction: 2);
+
+	var peak = freq * ffreqMul;
+	var filtEnv = EnvGen.ar(Env.adsr(fAtk, fDec, 1, fDec, peak.clip(10,20000), -4, ffreq));
+	var res = vol.linlin(0,1,0,3.9);
+
+	var sig = Pulse.ar(pitch, 0.15);
+	sig = MoogFF.ar(sig, filtEnv, res, mul:25.dbamp);
+	Out.ar(out, Pan2.ar(sig, pan, amp * ampEnv));
+}).add;
+
+SynthDef(\thump, {
+	arg out, gate=1, freq=261.63, freqlag=0, pan=0, bend=0, ffreq=112.6, vol=2, ffreqMul=15, fAtk=0.1, fDec=0.4, fSus=0.6, atk=0.001, dec=0.05, sus=0.6, mod=0;
+
+	var	lfo = LFTri.kr(6, 0, 24*(mod.midiratio - 1));
+	var detun = freq-0.32.midiratio;
+	var pitch = Lag.kr(detun * lfo.midiratio * bend.midiratio, freqlag) * [1, 0.5];
+
+	var amp = Latch.kr(gate, gate).linlin(0, 1, 0.05, 0.25);
+	var ampEnv = EnvGen.ar(Env.adsr(atk, dec, sus, dec), gate, doneAction: 2);
+
+	var peak = freq * ffreqMul;
+	var filtEnv = EnvGen.ar(Env.perc(0.01, 0.3, peak.clip(10,20000), -4), levelBias:1.5*ffreq);
+	var res = vol.linlin(0,1,0,3.9);
+
+	var sig = SawDPW.ar(pitch, mul:0.15);
+	sig = MoogFF.ar(sig, filtEnv, res, mul:25.dbamp);
+	Out.ar(out, Pan2.ar(sig, pan, amp * ampEnv));
+}).add;
+
+SynthDef(\diamond, {
+	arg out, gate=1, freq=261.63, freqlag=0.6, pan=0, bend=0, ffreq=112.6, vol=1, ffreqMul=3, fAtk=0.6, fDec=0.6, fSus=0.9, atk=0.3, dec=0.6, sus=0.7, mod=0, detun=0.1;
+
+	var	lfo = LFTri.kr(5, 0, 24*(0.2.midiratio - 1));
+	var pitch = Lag.kr(freq * lfo.midiratio * bend.midiratio, freqlag) * [1, detun.midiratio];
+
+	var amp = Latch.kr(gate, gate).linlin(0, 1, 0.05, 0.25);
+	var ampEnv = EnvGen.ar(Env.adsr(atk, dec, sus, 0.05), gate, doneAction: 2);
+
+	var peak = freq * ffreqMul;
+	var filtEnv = EnvGen.ar(Env.adsr(fAtk, fDec, 1, fDec, peak.clip(10,20000), -4, ffreq));
+	var res = 1;
+
+	var sig = SawDPW.ar(pitch, mul:0.5);
+	sig = MoogFF.ar(sig, filtEnv, res, mul:25.dbamp);
+	Out.ar(out, Pan2.ar(sig, pan, amp * ampEnv)).softclip;
+}).add;
+
+SynthDef(\wonderbass, {
+	arg out, gate=1, freq=261.63, freqlag=0.1, pan=0, bend=0, ffreq=260, vol=1, ffreqMul=6, fAtk=0.6, fDec=0.6, fSus=0.9, atk=0.05, dec=0.058, sus=0.81, mod=0, detun=0.1;
+
+	var	lfo = LFTri.kr(5, 0, 24*(mod.midiratio - 1));
+	var pitch = Lag.kr(freq * lfo.midiratio * bend.midiratio, freqlag) * [1, detun.midiratio];
+
+	var amp = Latch.kr(gate, gate).linlin(0, 1, 0.05, 0.25);
+	var ampEnv = EnvGen.ar(Env.adsr(atk, dec, sus, dec), gate, doneAction: 2);
+
+	var peak = freq * ffreqMul;
+	var filtEnv = EnvGen.ar(Env.adsr(0.05, 0.3, 0.12, 0.3, peak.clip(10,20000), -4), gate, levelBias:ffreq);
+	var res = vol.linlin(0,1,0,3.9);
+	var sig1 = SawDPW.ar(pitch * bend.midiratio, mul:0.6);
+	var sig2 = LFTri.ar(0.5 * pitch * bend.midiratio, mul:0.4);
+
+	var sig = Mix.ar([sig1, sig2]);
+	sig = MoogFF.ar(sig, filtEnv, res, mul:25.dbamp);
+	Out.ar(out, Pan2.ar(sig, pan, amp * ampEnv));
+}).add;
+
+SynthDef(\supersaw, {
+	|freq=261.63, voices=8, detun=0.25, pan=0, outBus=0, atk=0.05, dec=0.3, sus=0.5, rel=0.2, freqLag=0.1, bend=0, mod=0, gate=1|
+	var v, sum, sig, env, lfo, pitch, amp;
+	lfo = LFTri.kr(5, 0, 24*(mod.midiratio - 1));
+	pitch = Lag.kr(freq * lfo.midiratio, freqLag);
+	sum = 0;
+	8.do{
+		v = SawDPW.ar(pitch * (Rand(-1*detun, detun).midiratio * bend.midiratio), Rand(0.0,1.0), 1/8);
+		sum = sum+v;
+	};
+	env = EnvGen.ar(Env.adsr(atk, dec, sus, rel), gate, doneAction:2);
+	amp = Latch.kr(gate, gate).linlin(0, 1, 0.05, 0.25);
+	sig = sum * amp * env * 6.dbamp;
+	sig = Pan2.ar(sig, pan);
+	Out.ar(outBus, sig);
+}).add;
+
+SynthDef(\supersquare, {
+	|freq=261.63, detun=0.25, pan=0, outBus=0, atk=0.05, dec=0.3, sus=0.5, rel=0.2, freqLag=0.1, bend=0, mod=0, gate=1, width=0.5|
+	var v, sum, sig, env, lfo, pitch, amp;
+	lfo = LFTri.kr(5, 0, 24*(mod.midiratio - 1));
+	pitch = Lag.kr(freq * lfo.midiratio, freqLag);
+	sum = 0;
+	8.do{
+		v = PulseDPW.ar(pitch * (Rand(-1*detun, detun).midiratio * bend.midiratio), Rand(0.0,1.0), width, 1/8);
+		sum = sum+v;
+	};
+	env = EnvGen.ar(Env.adsr(atk, dec, sus, rel), gate, doneAction:2);
+	amp = Latch.kr(gate, gate).linlin(0, 1, 0.05, 0.25);
+	sig = sum * amp * env * 6.dbamp;
+	sig = Pan2.ar(sig, pan);
+	Out.ar(outBus, sig);
+}).add;
+
+SynthDef(\ssqbass, {
+	|freq=261.63, detun=0.25, pan=0, outBus=0, atk=0.05, dec=0.3, sus=0.5, rel=0.2, freqLag=0.1, bend=0, mod=0, gate=1, width=0.5|
+	var v, sum, sig, env, lfo, pitch, amp;
+	lfo = LFTri.kr(5, 0, 24*(mod.midiratio - 1));
+	pitch = Lag.kr(freq * lfo.midiratio, freqLag);
+	sum = 0;
+	8.do{
+		v = LFPulse.ar(pitch * (Rand(-1*detun, detun).midiratio * bend.midiratio), Rand(0.0,1.0), width, 1/8);
+		sum = sum+v;
+	};
+	env = EnvGen.ar(Env.adsr(atk, dec, sus, rel), gate, doneAction:2);
+	amp = Latch.kr(gate, gate).linlin(0, 1, 0.05, 0.25);
+	sig = sum * amp * env * 6.dbamp;
+	sig = Pan2.ar(sig, pan);
+	Out.ar(outBus, sig);
+}).add;
+
+SynthDef(\ssbass, {
+	|freq=261.63, detun=0.25, pan=0, outBus=0, atk=0.05, dec=0.3, sus=0.5, rel=0.2, freqLag=0.1, bend=0, mod=0, gate=1|
+	var v, sum, sig, env, lfo, pitch, amp;
+	lfo = LFTri.kr(5, 0, 24*(mod.midiratio - 1));
+	pitch = Lag.kr(freq * lfo.midiratio, freqLag);
+	sum = 0;
+	8.do{
+		v = SawDPW.ar(pitch * (Rand(-1*detun, detun).midiratio * bend.midiratio), Rand(0.0,1.0), 1/8);
+		sum = sum+v;
+	};
+	env = EnvGen.ar(Env.adsr(atk, dec, sus, rel), gate, doneAction:2);
+	amp = Latch.kr(gate, gate).linlin(0, 1, 0.05, 0.25);
+	sig = sum * 0.5;
+	sig = sum + LFTri.ar(0.5 * pitch * bend.midiratio, 0.0, 0.5);
+	sig = sig * amp * env * 6.dbamp;
+	sig = Pan2.ar(sig, pan);
+	Out.ar(outBus, sig);
+}).add;
+
+SynthDef(\fmsquare, {
+	arg out, gate=1, freq=261.63, freqlag=0.1, pan=0, bend=0, ffreq=260, vol=1, ffreqMul=6, fSus=1, fdec=0.5, atk=0.05, dec=0.058, sus=0.81, mod=0, detun=0.1, rq=1;
+
+	var	lfo = LFTri.kr(5, 0, 24*(mod.midiratio - 1));
+	var pitch = Lag.kr(freq * lfo.midiratio * bend.midiratio, freqlag);
+
+	var amp = Latch.kr(gate, gate).linlin(0, 1, 0.05, 0.25);
+	var ampEnv = EnvGen.ar(Env.adsr(atk, dec, sus, 0.05), gate, doneAction: 2);
+	var filtEnv = Line.ar(ffreqMul, fSus, fdec, freq).clip(20, 20000);
+	var res = vol.linlin(0,1,0,3.9);
+	var index1 = EnvGen.ar(Env([0.1,1],[0.5],-4), gate);
+	var index2 = EnvGen.ar(Env([1,0.1],[0.5],-4), gate);
+	var op1 = SinOsc.ar(2*pitch, mul: 2*pitch*index1);
+	var op2 = SinOsc.ar(4*pitch, mul: 4*pitch*index2);
+	var sig = SinOsc.ar((pitch * bend.midiratio)+op1+op2);
+	sig = BPF.ar(sig, filtEnv, rq, 5.dbamp);
+	Out.ar(out, Pan2.ar(sig, pan, amp * ampEnv));
+}).add;
+
+SynthDef(\pwmbass, {
+	|out=0, gate=1, freq=261.63, freqlag=0.1, pan=0, atk=0.05, dec=0.058, sus=0.81, rel=0.3, pwmFreq=0.5, bend=0, mod=0|
+	var sig, pwm, ampEnv, amp, lfo, pitch;
+	lfo = LFTri.kr(5, 0, 24*(mod.midiratio - 1));
+	pitch = Lag.kr(freq * lfo.midiratio, freqlag);
+	pwm = LFTri.kr(pwmFreq, 0, 1, 0);
+	amp = Latch.kr(gate, gate).linlin(0, 1, 0.05, 0.25);
+	ampEnv = EnvGen.ar(Env.adsr(atk, dec, sus, rel), gate, doneAction: 2);
+	sig = PulseDPW.ar(freq, pwm) * 2.dbamp;
+	Out.ar(out, Pan2.ar(sig, pan, amp * ampEnv));
+}).add;
+})
+)
